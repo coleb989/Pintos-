@@ -1,0 +1,239 @@
+      +--------------------+
+      |    EDA092/DIT400   |
+      | LAB ASSIGNMENT 2:  |
+      |   THREADS      |
+      |   DESIGN DOCUMENT  |
+      +--------------------+
+           
+---- GROUP B 19 ----
+
+Coleb Mujurizi 
+Jemima Masamu 
+
+---- PRELIMINARIES ----
+
+>> If you have any preliminary comments on your submission, notes for the
+>> TAs, please give them here.
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+
+           ALARM CLOCK
+           ===========
+
+---- DATA STRUCTURES ----
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+- In timer.c, the global variable was added:
+
+static int64_t ticks;
+ This is for indicating the number of timer ticks since OS booted. 
+
+
+ static void wake_threads;
+
+ It keeps tracks of the sleeping threads, and decides on whether to unblock 
+ the thread if the ticks have reached zero or to keep on decrementing the ticks.
+
+- In thread.h, variable was added to struct thread:
+
+ int64_t sleep_ticks;
+ 
+ Time to sleep a thread in ticks.
+
+---- ALGORITHMS ----
+
+>> A2: Briefly describe what happens in a call to timer_sleep(),
+>> including the effects of the timer interrupt handler.
+
+In timer_sleep:
+1)Check the ticks if(ticks <= 0).
+2)Then, we assign requested sleep time to current thread and 
+  disable the interrupt handler to ensure serialization.
+3)Block the thread and then set the old interrupt level that was used 
+  before the current thread was blocked to avoid logic crashes.
+  
+In timer interrupt handler:
+
+1) The timer interrupt handler will call the wake_thread function in every tick 
+   to check the sleeping ticks for the threads that have been blocked.
+2) If the sleeping tick = 0, then it has to wake the thread otherwise it 
+   keeps on decrementing the sleeping ticks.
+
+>> A3: What steps are taken to minimize the amount of time spent in
+>> the timer interrupt handler?
+
+- The blocked threads which are sleeping threads are sorted in order when 
+  kept in the sleeping list so when it is time to check the threads in order 
+  to wake up the one with the sleeping ticks equal to zero, it is easy to find 
+  the thread to unblock hence reduce the time spent in the timer interrupt handler.
+
+---- SYNCHRONIZATION ----
+
+>> A4: How are race conditions avoided when multiple threads call
+>> timer_sleep() simultaneously?
+
+-Interrupts are disabled when a thread calls timer_sleep(),no other thread will interrupt it 
+ and hence there will be no chances of race conditions. 
+
+>> A5: How are race conditions avoided when a timer interrupt occurs
+>> during a call to timer_sleep()?
+
+-Since interrupts are disabled when a thread calls timer_sleep(), there is no race condition. 
+
+
+---- RATIONALE ----
+
+>> A6: Why did you choose this design? In what ways is it superior to
+>> another design you considered?
+
+-As the loop iterates through all threads which are sleeping when the 
+ timer_interrupt is called, but when the list is sorted out, it reduces the 
+ time for checking every sleeping thread as they will be arranged according to 
+ their sleeping ticks so it will be easy to find the thread which needs to be 
+ unblocked than if the thread list was not sorted. This improves the code's execution/performance.
+
+          BATCH SCHEDULING
+          ================
+---- DATA STRUCTURES ----
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, semaphore, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+We defined and used the following declarations:
+
+#define BOTH -1 
+- For defining that the direction can either be SENDER or RECEIVER.
+
+#define MAXSLEEPTIME 10
+- This is the waiting sleeping time in ticks for passing the bus.
+
+struct semaphore bus_cap;
+- The number of slots on the bus.
+
+struct semaphore send_priority; 
+- Semaphore for the send_priority task.
+
+struct semaphore receive_priority;  
+- Semaphore for the receive_priority task.
+
+struct semaphore mutex;
+- Mutex lock semaphore.
+
+int current_direction = BOTH;
+- The direction for either SENDER or RECEIVER.
+
+struct semaphore sender_task; 
+- Semaphore for tasks on SENDER direction.
+
+struct semaphore receiver_task;
+- Semaphore for tasks on RECEIVER direction.
+
+struct semaphore normal_tasks_enter; 
+- The number of NORMAL priority tasks accessing the bus.
+
+unsigned int normal_tasks_send;
+- Number of NORMAL priority tasks on SENDER direction.
+
+unsigned int normal_tasks_receive;
+- Number of NORMAL priority tasks on RECEIVER direction.
+
+unsigned int high_tasks_send;
+- Number of HIGH priority tasks on SENDER direction.
+
+unsigned int high_tasks_receive;
+- Number of HIGH priority tasks on RECEIVER direction.
+
+int high_tasks_on_bus;
+- Number of high priority tasks on the bus.
+
+int tasks_on_bus;
+- Number of tasks currently on the bus.
+
+
+---- SYNCHRONIZATION ----
+
+>> C1: How does your solution guarantee that no more that 3 tasks
+>> are using the bus in the same direction?
+
+- Before using the bus, tasks have to first acquire a lock and there are conditions
+  set before a task can acquire the lock e.g acquire the lock only if the bus capacity (3) 
+  has not been reached otherwise the task waits in the queue.
+
+>> C2: What prevents tasks from opposite directions from using the
+>> bus simultaneously?
+
+- The use of half-duplex communication bus means that data can be 
+  transmitted in both directions on a signal carrier, but not at the same time. So as 
+  long as tasks on one direction are using the bus the other direction can not use the bus.
+
+- Also, the use of locks in using the bus in which a task has to first acquire a lock and then 
+  use the bus. If the lock is not available, the task on the other side 
+  will have to wait until the last task using the bus signals or releases the 
+  lock to indicate that the bus is now free.
+
+>> C3: How does your solution grant priority to high priority tasks over
+>> the waiting tasks in the same direction?
+
+- The task first checks the bus capacity (bus_cap < 3), then we have a condition which 
+  favours HIGH priority tasks over normal priority task. If the task in the queue has NORMAL 
+  priority, it will have to check if there are high priority tasks waiting to access the bus and 
+  then let them use the bus first.
+- But if the bus is free (bus_cap == 0), then it can go ahead and use the bus as it is now free 
+  oly if that task on the list has HIGH priority.
+- Implementation of when the NORMAL priority on the waiting list wants to access the bus and 
+  it has to check if there are HIGH priority tasks on the waiting list is as shown below:
+  
+   if (priority == NORMAL){
+    if ((total_high_tasks == 0) && (high_tasks_on_bus == 0)){
+      sema_up(&normal_tasks_enter);
+
+
+>> C4: How do you guarantee that despite having priority, high priority
+>> tasks do not start using the bus while there are still still using
+>> it in the opposite direction?
+
+- There is direction checking for the tasks before accessing the bus. When the 
+  HIGH priority task finds that it is in opposite direction to the task using the bus it 
+  has to wait for the other side to finish since the bus is half-duplex.
+- Also when the (bus_cap == 0), the HIGH priority task can go ahead and use the task as 
+  there will be no tasks on the opposite direction using the bus. 
+
+---- RATIONALE ----
+
+>> C6: Why did you choose this design? Did you consider other design 
+>> alternatives? In what ways is it superior to another design you considered?
+
+- We considered this design basing on the narrow bridge problem because we discovered that 
+  it uses the same concept in solving synchronization issues. We didn't consider using any other design 
+  since we immediately agreed that our first design was the best.
+
+
+         SURVEY QUESTIONS (optional).
+         ===========================
+
+Answering these questions is optional, but it will help us improve the
+course in future quarters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the quarter.
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+
+>> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students, either for future quarters?
+
+>> Any other comments?
